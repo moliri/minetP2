@@ -86,9 +86,43 @@ int main(int argc, char *argv[])
 	tcph.GetDestPort(c.srcport);
 	tcph.GetSourcePort(c.destport);
 
+	//match ports and ips to existing connection
+	//if no existing match, check flag for syn bit
+	//if syn, make new connection, send syn ack
+
 	ConnectionList<TCPState>::iterator cs = clist.FindMatching(c);
 	if (cs!=clist.end()) {
-	  len= TCPHeader::EstimateTCPHeaderLength(p);
+		switch((*cs).GetState()){
+			case CLOSED:
+				cerr << "Connection is closed...\n";
+				return -1;
+				break;
+			case LISTEN:
+				if (tcph.IS_SYN(f)){
+					//put the seq num with connection, so
+					//next packet is in order
+					//send syn
+					//send syn ack
+					//change state to syn_rcvd	
+				}
+				break;
+			case SYN_RCVD:
+			case SYN_SENT:
+			case SYN_SENT1:
+			case ESTABLISHED:
+			case SEND_DATA:
+			case CLOSE_WAIT:
+			case FIN_WAIT1:
+			case CLOSING:
+			case LAST_ACK:
+			case FIN_WAIT2:
+			case TIME_WAIT:
+			default:
+				cerr << "not implemented...\n";
+				break;
+		}
+	}
+	  /*len= TCPHeader::EstimateTCPHeaderLength(p);
 	  cerr << "estimated header len="<<len<<"\n";
 	  Buffer &data = p.GetPayload().ExtractFront(len);
 	  SockRequestResponse write(WRITE, (*cs).connection, data, len, EOK);
@@ -108,7 +142,18 @@ int main(int argc, char *argv[])
 	cerr << "TCP Packet: IP Header is "<<iph<<" and ";
 	cerr << "TCP Header is "<<tcph << " and ";
 	cerr << "Checksum is " << (tcph.IsCorrectChecksum(p) ? "VALID" : "INVALID");
-	}
+	
+	//we have the tcp headers, so we should see what kind
+	//of packet we have, then compare it to current connections
+	//get the flags so we can test them
+	
+
+	char * f;
+	tcph.GET_FLAGS(f);
+	
+
+	}*/
+
 
 /*	unsigned tcphlen=TCPHeader::EstimateTCPHeaderLength(p);
 	cerr << "estimated header len="<<tcphlen<<"\n";
@@ -123,9 +168,26 @@ int main(int argc, char *argv[])
       }*/
       //  Data from the Sockets layer above  //
       if (event.handle==sock) {
-	SockRequestResponse s;
-	MinetReceive(sock,s);
+	SockRequestResponse request;
+	if(MinetReceive(sock,request)< 0){
+		cerr < "Unable to receive Socket...\n";
+		return -1;
+	}
+	switch (request.type) {
+	  case CONNECT:
+	  case ACCEPT:
+	  case STATUS:
+	  case WRITE:
+	  case FORWARD:
+	  case CLOSE:
+	  default:
+		SockRequestResponse reply;
+		reply.type=STATUS;
+		reply.error=EWHAT;
+		MinetSend(sock,reply);
+
 	cerr << "Received Socket Request:" << s << endl;
+        }
       }
     }
   }
