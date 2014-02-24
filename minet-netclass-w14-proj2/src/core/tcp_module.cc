@@ -14,20 +14,9 @@
 #include <iostream>
 
 #include "Minet.h"
+#include "tcpstate.h"
 
-
-using std::cout;
-using std::endl;
-using std::cerr;
-using std::string;
-
-struct TCPState {
-  std::ostream & Print(std::ostream &os) const { os << "TCPState()"; return os;}
-
-  friend std::ostream &operator<<(std::ostream &os, const TCPState& L) {
-		return L.Print(os);
-  }
-};
+using namespace std;
 
 int main(int argc, char *argv[])
 {
@@ -66,10 +55,10 @@ int main(int argc, char *argv[])
       //  Data from the IP layer below  //
       if (event.handle==mux) {
 	Packet p;
-	unsigned short len;
 	bool checksumok;
 	MinetReceive(mux,p);
-	p.ExtractHeaderFromPayload<TCPHeader>(8);
+	//GET TCP HEADER SIZE
+	//p.ExtractHeaderFromPayload<TCPHeader>(HEADER SIZE);
 	TCPHeader tcph;
 	tcph=p.FindHeader(Headers::TCPHeader);
 	checksumok=tcph.IsCorrectChecksum(p);
@@ -89,22 +78,20 @@ int main(int argc, char *argv[])
 	//match ports and ips to existing connection
 	//if no existing match, check flag for syn bit
 	//if syn, make new connection, send syn ack
-
-	ConnectionList<TCPState>::iterator cs = clist.FindMatching(c);
+	//lookup ctags
+	ConnectionToStateMapping<TCPState>::iterator cs = clist.FindMatching(c);
 	if (cs!=clist.end()) {
-		switch((*cs).GetState()){
+		switch(cs->state.GetState()){
 			case CLOSED:
 				cerr << "Connection is closed...\n";
 				return -1;
 				break;
 			case LISTEN:
-				if (tcph.IS_SYN(f)){
 					//put the seq num with connection, so
 					//next packet is in order
 					//send syn
 					//send syn ack
 					//change state to syn_rcvd	
-				}
 				break;
 			case SYN_RCVD:
 			case SYN_SENT:
@@ -167,26 +154,33 @@ int main(int argc, char *argv[])
 	
       }*/
       //  Data from the Sockets layer above  //
+	  }
       if (event.handle==sock) {
 	SockRequestResponse request;
 	if(MinetReceive(sock,request)< 0){
-		cerr < "Unable to receive Socket...\n";
+		cerr << "Unable to receive Socket...\n";
 		return -1;
 	}
 	switch (request.type) {
 	  case CONNECT:
+	  //creat socket and send syn packet to IP layer to establish
+	  //change state to syn-sent
 	  case ACCEPT:
+	  //create a connection and put into clist
 	  case STATUS:
 	  case WRITE:
+	  //send out the packet to the designated connection in clist
 	  case FORWARD:
 	  case CLOSE:
+	  //send fin bit 
+	  //change state
 	  default:
 		SockRequestResponse reply;
 		reply.type=STATUS;
 		reply.error=EWHAT;
 		MinetSend(sock,reply);
 
-	cerr << "Received Socket Request:" << s << endl;
+	cerr << "Received Socket Request:" << request << endl;
         }
       }
     }
