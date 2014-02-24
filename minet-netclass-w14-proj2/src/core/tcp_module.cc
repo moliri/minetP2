@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
 	//if no existing match, check flag for syn bit
 	//if syn, make new connection, send syn ack
 	//lookup ctags
-	ConnectionToStateMapping<TCPState>::iterator cs = clist.FindMatching(c);
+	ConnectionList<TCPState>::iterator cs = clist.FindMatching(c);
 	if (cs!=clist.end()) {
 		switch(cs->state.GetState()){
 			case CLOSED:
