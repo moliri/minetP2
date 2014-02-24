@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include "minet_socket.h"
 
 #include <string.h>
 #include <iostream>
@@ -170,12 +171,11 @@ int main(int argc, char *argv[])
 			cerr << "Unable to receive Socket...\n";
 			return -1;
 		}
-		  Packet p;
 		  //following lines copied from lines 127-137 of udp_module.cc-jg
 		  unsigned bytes = MIN_MACRO(TCP_HEADER_OPTION_MAX_LENGTH, request.data.GetSize());
 		  Packet p(request.data.ExtractFront(bytes));
 
-		  len = request.data.GetSize();//idea from buffer.h to get tcpheader size-jg
+		  unsigned len = request.data.GetSize();//idea from buffer.h to get tcpheader size-jg
 		  
 		  //make IPHeader first-jg
 		  IPHeader ih;
@@ -185,6 +185,11 @@ int main(int argc, char *argv[])
 		  ih.SetTotalLength(bytes+len+IP_HEADER_BASE_LENGTH);
 		  // push it onto the packet
 		  p.PushFrontHeader(ih);
+		  
+		  //iterator and mapping-jg
+		  ConnectionList<TCPState>::iterator cs = clist.FindMatching(request.connection);
+		  ConnectionToStateMapping<TCPState> mapping;
+		  
 		switch (request.type) {
 		  case CONNECT:
 		  {
@@ -199,14 +204,20 @@ int main(int argc, char *argv[])
 			  //send syn packet to IP layer to establish connection -jg
 			    
 				//now make TCPHeader-jg
+				
 			  TCPHeader th;
+			  unsigned tcphlen=TCPHeader::EstimateTCPHeaderLength(p);
+			  cerr << "estimated header len="<<tcphlen<<"\n";
+			  p.ExtractHeaderFromPayload<TCPHeader>(tcphlen);
+			  
 			  th.SetSourcePort(request.connection.srcport,p);
 			  th.SetDestPort(request.connection.destport,p);
-			  th.SetLength(len+bytes,p);
 			  
 			  //set the syn bit-jg
-			  char f = 0;
-			  th.SET_SYN(f);
+			  unsigned char f = 0;
+			  th.GetFlags(f);
+			  SET_SYN(f);
+			  th.SetFlags(f,p);
 			  
 			  //push it onto the packet-jg
 			  p.PushFrontHeader(th);
@@ -225,33 +236,33 @@ int main(int argc, char *argv[])
 			  //change state to syn-sent-jg
 			  cs->state.SetState(SYN_SENT);
 			break;
-			}
+		}
 		  case ACCEPT:
-		  //create a connection and put into clist-jg
-		  ConnectionToStateMapping<TCPState> mapping;
-		  mapping.connection=request.connection;
-		  
-		  //before adding, check if there is already this connection-jg
-		  ConnectionList<TCPState>::iterator cs = clist.FindMatching(request.connection);
-		  if (cs!=clist.end()){
-				//if there is a connection, we can't accept one that is here-jg
-				SockRequestResponse reply;
-				reply.type=STATUS;
-				reply.error=ERESOURCE_UNAVAIL;
-				MinetSend(sock,reply);
-				break;
-		  }
-		  //add the connection to the list.-jg
-		  clist.push_back(m);
-		
-			SockRequestResponse reply;
-			reply.type=ACCEPT;
-			reply.connection=request.connection;
-			reply.bytes=bytes;
-			reply.error=EOK;
-			MinetSend(sock,reply);
+		  {
+			  //create a connection and put into clist-jg
+			  mapping.connection=request.connection;
+			  
+			  //before adding, check if there is already this connection-jg
+			  if (cs!=clist.end()){
+					//if there is a connection, we can't accept one that is here-jg
+					SockRequestResponse reply;
+					reply.type=STATUS;
+					reply.error=ERESOURCE_UNAVAIL;
+					MinetSend(sock,reply);
+					break;
+			  }
+			  //add the connection to the list.-jg
+			  clist.push_back(mapping);
 			
-			break;
+				SockRequestResponse reply;
+				reply.type=ACCEPT;
+				reply.connection=request.connection;
+				reply.bytes=bytes;
+				reply.error=EOK;
+				MinetSend(sock,reply);
+				
+				break;
+			}
 		  case STATUS:
 		  case WRITE:
 		  //send out the packet to the designated connection in clist-jg
@@ -266,6 +277,7 @@ int main(int argc, char *argv[])
 			MinetSend(sock,reply);
 
 			cerr << "Received Socket Request:" << request << endl;
+			break;
         }
       }
     }
