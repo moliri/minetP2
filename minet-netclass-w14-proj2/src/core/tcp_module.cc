@@ -25,6 +25,80 @@ void die(int fd) {
     exit(0);
 }
 
+//checks the incoming packet to make sure its in the acceptable
+//sequence number range. returns true if fine, false otherwise
+//from page 75 of rfc -jg
+bool InSequence(TCPHeader tcph, TCPState state, unsigned len){
+	unsigned int sequenceNum;
+	tcph.GetSeqNum(sequenceNum);
+	unsigned int next = state.last_recvd+len;
+	
+	//seg length 0, receive window 0 -jg
+	if((len==0 && state.rwnd==0) && sequenceNum==next){
+		return true;
+	}
+	//seg length 0, receive window > 0 -jg
+	if(len==0 && (next <= sequenceNum) && (sequenceNum <= next+state.GetN())){
+		return true;
+	}
+	//seg length >0, receive window 0 -jg
+	if(len>0 && state.GetN() == 0){
+		return false;
+	}
+	//seg length >0, receive window > 0 -jg
+	if(len>0 && state.GetN() > 0){
+		if((next <= sequenceNum) && (sequenceNum <= next+state.GetN())){
+			return true;
+		}
+		if((next <= sequenceNum + len-1 )&& (sequenceNum + len-1 <= next+state.GetN())){
+			return true;
+		}
+	}
+	return false;
+}
+
+//if sequence is wrong for any states listed on rfc 75, make a packet
+//with seq = send.next; ack = rcv.next, control = ack
+Packet Unacceptable(Connection c,TCPHeader tcph, TCPState state, unsigned len){
+	Packet p;
+	IPHeader iph;
+	TCPHeader th;
+	  
+	iph.SetProtocol(IP_PROTO_TCP);
+	iph.SetSourceIP(c.src);
+	iph.SetDestIP(c.dest);
+	
+	//push IP header onto packet
+	p.PushFrontHeader(iph);
+	
+	th.SetSourcePort(c.srcport,p);
+	th.SetDestPort(c.destport,p);
+	
+	//set sequence number = to send.next
+	unsigned int seq;
+	seq = state.GetLastSent();
+	//only adding the base length since there isn't any payload with this packet-jg
+	seq+=TCP_HEADER_BASE_LENGTH;
+	th.SetSeqNum(seq,p);
+	
+	//set ack to recv.next
+	unsigned int ack;
+	tcph.GetAckNum(ack);
+	ack+=TCP_HEADER_BASE_LENGTH;
+	th.SetAckNum(ack,p);
+	  
+	//set the ack bit-jg
+	unsigned char f = 0;
+	th.GetFlags(f);
+	SET_ACK(f);
+	th.SetFlags(f,p);
+	  
+	//push it onto the packet-jg
+	p.PushFrontHeader(th);
+	
+	return p;
+}
+
 int main(int argc, char *argv[])
 {
   //i don't know if we should change these at all--jg
@@ -70,6 +144,7 @@ int main(int argc, char *argv[])
 		TCPHeader tcph;
 		tcph=p.FindHeader(Headers::TCPHeader);
 		checksumok=tcph.IsCorrectChecksum(p);
+		unsigned length = tcph.EstimateTCPHeaderLength(p);
 		IPHeader iph;
 		iph=p.FindHeader(Headers::IPHeader);
 		Connection c;
@@ -91,6 +166,13 @@ int main(int argc, char *argv[])
 		if (cs!=clist.end()) {
 			cerr << "State is " << cs->state.GetState();
 			cerr << endl;
+			bool correctSequence;
+			if(InSequence(tcph,cs->state,length)){
+				correctSequence = true;
+			} else{
+				correctSequence = false;
+			}
+			break;
 			switch(cs->state.GetState()){
 				case CLOSED:
 					cerr << "Connection is closed...\n";
@@ -104,16 +186,64 @@ int main(int argc, char *argv[])
 						//change state to syn_rcvd	-jg
 					break;
 				case SYN_RCVD:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case SYN_SENT:
 				case SYN_SENT1:
 				case ESTABLISHED:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case SEND_DATA:
 				case CLOSE_WAIT:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case FIN_WAIT1:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case CLOSING:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case LAST_ACK:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case FIN_WAIT2:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				case TIME_WAIT:
+					if(!correctSequence){
+						//do packet error stuff-jg
+						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+						break;
+					}
+					break;
 				default:
 					cerr << "not implemented...\n";
 					break;
