@@ -175,23 +175,68 @@ int main(int argc, char *argv[])
 			break;
 			switch(cs->state.GetState()){
 				case CLOSED:
-					cerr << "Connection is closed...\n";
-					return -1;
+				{
+					Packet pC;
+					IPHeader ih;
+					TCPHeader th;
+					  
+					ih.SetProtocol(IP_PROTO_TCP);
+					ih.SetSourceIP(c.src);
+					ih.SetDestIP(c.dest);
+					
+					//push IP header onto packet-jg
+					pC.PushFrontHeader(ih);
+					
+					//get control flags-jg
+					unsigned char oldF,newF = 0;
+					tcph.GetFlags(oldF);
+					
+					//set src and dst ports for tcp header-jg
+					th.SetSourcePort(c.srcport,pC);
+					th.SetDestPort(c.destport,pC);
+					
+					//if ack bit is off, seq num 0 is used and ack with ack num seq+seq.len-jg
+					//reset and ack fields of control flag set-jg
+					unsigned int seqNum;
+					tcph.GetSeqNum(seqNum);
+					unsigned int ackNum;
+					tcph.GetAckNum(ackNum);
+					unsigned int seqLen = tcph.EstimateTCPHeaderLength(p);
+					if (!IS_ACK(oldF)){
+						th.SetSeqNum(0,pC);
+						th.SetAckNum(seqNum+seqLen,pC);
+						SET_ACK(newF);
+						SET_RST(newF);
+					}
+					//if ack bit is on, seq num of segment's ack is used, no ack sent-jg
+					//rset field set for control flag-jg
+					else {
+						th.SetSeqNum(ackNum,pC);
+						SET_RST(newF);
+					}
+					th.SetFlags(newF,pC);
+					pC.PushFrontHeader(th);
+					MinetSend(mux,pC);
 					break;
+				}
 				case LISTEN:
+				{
 						//put the seq num with connection, so
 						//next packet is in order
 						//send syn
 						//send syn ack
 						//change state to syn_rcvd	-jg
 					break;
+				}
 				case SYN_RCVD:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case SYN_SENT:
 				case SYN_SENT1:
 				case ESTABLISHED:
@@ -203,47 +248,59 @@ int main(int argc, char *argv[])
 					break;
 				case SEND_DATA:
 				case CLOSE_WAIT:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case FIN_WAIT1:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case CLOSING:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case LAST_ACK:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case FIN_WAIT2:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				case TIME_WAIT:
+				{
 					if(!correctSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
+				}
 				default:
 					cerr << "not implemented...\n";
 					break;
