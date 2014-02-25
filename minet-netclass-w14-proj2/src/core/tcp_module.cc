@@ -157,75 +157,107 @@ int main(int argc, char *argv[])
 
 		tcph.GetDestPort(c.srcport);
 		tcph.GetSourcePort(c.destport);
+		
+		Packet p2;
+		IPHeader ih;
+		TCPHeader th;
+		  
+		ih.SetProtocol(IP_PROTO_TCP);
+		ih.SetSourceIP(c.src);
+		ih.SetDestIP(c.dest);
+		
+		//push IP header onto packet-jg
+		p2.PushFrontHeader(ih);
+		
+		//get control flags-jg
+		unsigned char oldF,newF = 0;
+		tcph.GetFlags(oldF);
+		
+		//set src and dst ports for tcp header-jg
+		th.SetSourcePort(c.srcport,p2);
+		th.SetDestPort(c.destport,p2);
+		
+		unsigned int seqNum;
+		tcph.GetSeqNum(seqNum);
+		unsigned int ackNum;
+		tcph.GetAckNum(ackNum);
+		unsigned int seqLen = tcph.EstimateTCPHeaderLength(p);
 
 		//match ports and ips to existing connection
 		//if no existing match, check flag for syn bit
 		//if syn, make new connection, send syn ack
 		//lookup ctags-jg
+		
 		ConnectionList<TCPState>::iterator cs = clist.FindMatching(c);
-		if (cs!=clist.end()) {
 			cerr << "State is " << cs->state.GetState();
 			cerr << endl;
 			bool correctSequence;
-			if(InSequence(tcph,cs->state,length)){
-				correctSequence = true;
-			} else{
-				correctSequence = false;
-			}
-			break;
+			correctSequence = InSequence(tcph,cs->state,length);
+			unsigned int ISS = rand()%cs->state.GetN();
+		if (cs!=clist.end()) {
 			switch(cs->state.GetState()){
 				case CLOSED:
 				{
-					Packet pC;
-					IPHeader ih;
-					TCPHeader th;
-					  
-					ih.SetProtocol(IP_PROTO_TCP);
-					ih.SetSourceIP(c.src);
-					ih.SetDestIP(c.dest);
-					
-					//push IP header onto packet-jg
-					pC.PushFrontHeader(ih);
-					
-					//get control flags-jg
-					unsigned char oldF,newF = 0;
-					tcph.GetFlags(oldF);
-					
-					//set src and dst ports for tcp header-jg
-					th.SetSourcePort(c.srcport,pC);
-					th.SetDestPort(c.destport,pC);
-					
+					//rfc page 65
 					//if ack bit is off, seq num 0 is used and ack with ack num seq+seq.len-jg
 					//reset and ack fields of control flag set-jg
-					unsigned int seqNum;
-					tcph.GetSeqNum(seqNum);
-					unsigned int ackNum;
-					tcph.GetAckNum(ackNum);
-					unsigned int seqLen = tcph.EstimateTCPHeaderLength(p);
 					if (!IS_ACK(oldF)){
-						th.SetSeqNum(0,pC);
-						th.SetAckNum(seqNum+seqLen,pC);
+						th.SetSeqNum(0,p2);
+						th.SetAckNum(seqNum+seqLen,p2);
 						SET_ACK(newF);
 						SET_RST(newF);
 					}
 					//if ack bit is on, seq num of segment's ack is used, no ack sent-jg
 					//rset field set for control flag-jg
 					else {
-						th.SetSeqNum(ackNum,pC);
+						th.SetSeqNum(ackNum,p2);
 						SET_RST(newF);
 					}
-					th.SetFlags(newF,pC);
-					pC.PushFrontHeader(th);
-					MinetSend(mux,pC);
+					th.SetFlags(newF,p2);
+					p2.PushFrontHeader(th);
+					MinetSend(mux,p2);
 					break;
 				}
 				case LISTEN:
 				{
-						//put the seq num with connection, so
-						//next packet is in order
-						//send syn
-						//send syn ack
-						//change state to syn_rcvd	-jg
+					//rfc pg 65
+					//check for rst. if there is one, ignore it and return-jg
+					if (IS_RST(oldF)){
+						break;
+					}
+					//check for ack. form reset with seq=seg.ack and control=rest-jg
+					if (IS_ACK(oldF)){
+						th.SetSeqNum(ackNum,p2);
+						SET_RST(newF);
+						th.SetFlags(newF,p2);
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
+					}
+					
+					//check for syn.//ARE WE DOING SECURITY STUFF?
+					if (IS_SYN(oldF)){
+						//set recv.next to seg.seq+1.
+							//is there a recv.next in our tcpstate.h?-jg
+						//set initial received sequence number to seg.seq
+						cs->state.SetLastRecvd(seqNum);
+						//MAKE SYN: set seq to iss(make a new one)
+						th.SetSeqNum(ISS,p2);
+						//set ack to rcv.next, control to syn,ack
+						SET_SYN(newF);
+						SET_ACK(newF);
+						th.SetFlags(newF,p2);
+						th.SetAckNum(seqNum+1,p2);//same as above-jg
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
+						//set send.next to iss+1 and send.una to ISS
+						cs->state.SetLastSent(ISS+1);
+						//no unacked, so set last acked to ISS-1?-jg
+						cs->state.SetLastAcked(ISS-1);
+						//change state to syn-received
+						cs->state.SetState(SYN_RCVD);
+						break;
+					}
+
 					break;
 				}
 				case SYN_RCVD:
