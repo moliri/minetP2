@@ -99,6 +99,43 @@ Packet Unacceptable(Connection c,TCPHeader tcph, TCPState state, unsigned len){
 	return p;
 }
 
+//what to do if there is a syn in a wrong state (syn-rcvd->closing)
+void badSyn(unsigned char flag,Packet p,unsigned int ackNum, TCPHeader th,MinetHandle mux,ConnectionList<TCPState>::iterator cs){
+		//send reset packet-jg
+		SET_RST(flag);
+		th.SetSeqNum(ackNum,p);
+		th.SetFlags(flag,p);
+		p.PushFrontHeader(th);
+		MinetSend(mux,p);
+		//reset connection-jg
+		MinetSendToMonitor(MinetMonitoringEvent("error: connection reset"));
+		cs->state.SetState(CLOSED);
+}
+
+//to more easily test for the flags required for states syn-rcvd-->closing
+bool checkFlags(unsigned length,bool inSequence, unsigned char oldF, unsigned char newF, Packet p, unsigned int ackNum, TCPHeader oldth, TCPHeader newth, MinetHandle mux, Connection c, ConnectionList<TCPState>::iterator cs){
+	if(!inSequence){
+		//do packet error stuff-jg
+		MinetSend(mux, Unacceptable(c,oldth,cs->state,length));
+		return false;
+	}
+	//if reset is set, go to closed state-jg
+	if(IS_RST(oldF)){
+		cs->state.SetState(CLOSED);
+		return false;
+	}
+	if(IS_SYN(oldF)){
+		//send reset and reset connection -jg
+		badSyn(newF,p,ackNum,newth,mux,cs);
+		return false;
+	}
+	if(!IS_ACK(oldF)){
+		//drop segment and return-jg
+		return false;
+	}
+	return true;
+}
+
 int main(int argc, char *argv[])
 {
   //i don't know if we should change these at all--jg
@@ -328,70 +365,56 @@ int main(int argc, char *argv[])
 				//Otherwise, first check the seq-num:pg 69-jg
 				case SYN_RCVD:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case ESTABLISHED:
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+				{
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
+				}
 				case CLOSE_WAIT:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case FIN_WAIT1:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case CLOSING:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case LAST_ACK:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case FIN_WAIT2:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
 				}
 				case TIME_WAIT:
 				{
-					if(!inSequence){
-						//do packet error stuff-jg
-						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					break;
