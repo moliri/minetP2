@@ -1,0 +1,21 @@
+Bugs:
+
+Notes: For input, [S] = server, [C] = client
+
+1 [ ] TCP Server issue
+		INPUT												OUTPUT
+		- [S] ./start_minet.sh "tcp_server u 2323"			- tcp_server module prints:
+																Stack initialized
+																Socket created.
+																Socket bound.
+																Socket listened.
+																Accept failed.
+																reason:: unknown error
+															- sock_module prints:
+																Module is dying due to SIGSEGV
+																Enter to continue (closes module)
+		
+		- [C] nc 10.10.14.23 2323							- tcp_module prints:
+																Module is dying due to SIGSEGV
+																Enter to continue (closes module)
+	
