@@ -191,8 +191,8 @@ int main(int argc, char *argv[])
 		ConnectionList<TCPState>::iterator cs = clist.FindMatching(c);
 			cerr << "State is " << cs->state.GetState();
 			cerr << endl;
-			bool correctSequence;
-			correctSequence = InSequence(tcph,cs->state,length);
+			bool inSequence;
+			inSequence = InSequence(tcph,cs->state,length);
 			unsigned int ISS = rand()%cs->state.GetN();
 		if (cs!=clist.end()) {
 			switch(cs->state.GetState()){
@@ -260,28 +260,91 @@ int main(int argc, char *argv[])
 
 					break;
 				}
+				case SYN_SENT:
+				{
+					//if ack is set and <= ISS or > send.next and !reset, send reset
+					//with seq=seg.ack and ctrl = reset--jg
+
+					if (IS_ACK(oldF) && 
+							((ackNum <= ISS) || ( ackNum > cs->state.GetLastSent())) &&
+							(!IS_RST(oldF))){
+								//send reset with seq=seg.ack and ctrl= reset-jg
+								SET_RST(newF);
+								th.SetSeqNum(ackNum,p2);
+								th.SetFlags(newF,p2);
+								p2.PushFrontHeader(th);
+								MinetSend(mux,p2);
+								break;
+					}
+					//if the ack is acceptable and reset is set-jg
+					else if (inSequence && IS_RST(oldF)){
+						//this is a connection reset
+						MinetSendToMonitor(MinetMonitoringEvent("error: connection reset"));
+						cs->state.SetState(CLOSED);
+						break;
+					}
+					//if there is either no ack, or the ack is acceptable-jg
+					if (!IS_ACK(oldF) || inSequence){
+						if (IS_SYN(oldF)){
+							//rcv.nxt = seg.seq+1-jg
+							cs->state.SetLastRecvd(seqNum);
+							//IRS=seg.seq-jg
+							//there doesn't appear to be one in tcpstate...-jg
+							//(if there is an ack): snd.una=seg.ack -jg
+							//if snd.una < iss, set state to established, and form ack statement:
+								//seq=send.nxt, ack=rcv.nxt, ctl=ack and send-jg
+							if(cs->state.GetLastAcked() + 1 < ISS){
+								cs->state.SetState(ESTABLISHED);
+								SET_ACK(newF);
+								th.SetSeqNum(ISS,p2);
+								th.SetAckNum(seqNum+1,p2);
+								th.SetFlags(newF,p2);
+								p2.PushFrontHeader(th);
+								MinetSend(mux,p2);
+								break;
+							}
+							//else set state to syn-received, and form a syn,ack segment:
+								//seq=iss, ack=rcv.nxt,ctrl=ack,syn and send-jg
+							else {
+								cs->state.SetState(SYN_RCVD);
+								SET_ACK(newF);
+								SET_SYN(newF);
+								th.SetFlags(newF,p2);
+								th.SetAckNum(seqNum+1,p2);
+								th.SetSeqNum(ISS,p2);
+								p2.PushFrontHeader(th);
+								MinetSend(mux,p2);
+								break;
+							}
+						}
+					}
+					//if the ack is wrong and reset, ignore-jg
+					if (IS_RST(oldF)){
+						break;
+					}
+					break;
+					
+				}
+				//Otherwise, first check the seq-num:pg 69-jg
 				case SYN_RCVD:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
 				}
-				case SYN_SENT:
-				case SYN_SENT1:
 				case ESTABLISHED:
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
 					}
 					break;
-				case SEND_DATA:
 				case CLOSE_WAIT:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
@@ -290,7 +353,7 @@ int main(int argc, char *argv[])
 				}
 				case FIN_WAIT1:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
@@ -299,7 +362,7 @@ int main(int argc, char *argv[])
 				}
 				case CLOSING:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
@@ -308,7 +371,7 @@ int main(int argc, char *argv[])
 				}
 				case LAST_ACK:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
@@ -317,7 +380,7 @@ int main(int argc, char *argv[])
 				}
 				case FIN_WAIT2:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
@@ -326,7 +389,7 @@ int main(int argc, char *argv[])
 				}
 				case TIME_WAIT:
 				{
-					if(!correctSequence){
+					if(!inSequence){
 						//do packet error stuff-jg
 						MinetSend(mux, Unacceptable(c,tcph,cs->state,length));
 						break;
