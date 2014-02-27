@@ -265,6 +265,9 @@ int main(int argc, char *argv[])
 					th.SetFlags(newF,p2);
 					p2.PushFrontHeader(th);
 					MinetSend(mux,p2);
+					if(IS_FIN(oldF)){
+						break;
+					}
 					break;
 				}
 				case LISTEN:
@@ -306,7 +309,9 @@ int main(int argc, char *argv[])
 						cs->state.SetState(SYN_RCVD);
 						break;
 					}
-
+					if(IS_FIN(oldF)){
+						break;
+					}
 					break;
 				}
 				case SYN_SENT:
@@ -368,7 +373,7 @@ int main(int argc, char *argv[])
 						}
 					}
 					//if the ack is wrong and reset, ignore-jg
-					if (IS_RST(oldF)){
+					if (IS_RST(oldF) || IS_FIN(oldF)){
 						break;
 					}
 					break;
@@ -385,9 +390,15 @@ int main(int argc, char *argv[])
 						cs->state.SetState(ESTABLISHED);
 						break;
 					}
-					else{
-						//not acceptable, then form reset and send it.
-						//this case already handled by checkFlags
+					if(IS_FIN(oldF)){
+						CLR_ACK(newF); //get rid of any ack that data would have sent
+						th.SetSeqNum(cs->state.GetLastSent()+1,p2);
+						th.SetAckNum(seqNum,p2);
+						th.SetFlags(newF,p2);
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
+						cs->state.SetState(CLOSE_WAIT);
+						break;
 					}
 					break;
 				}
@@ -408,36 +419,51 @@ int main(int argc, char *argv[])
 					//should just be able to make a buffer and store payload there
 					//then move char * to ipheader length + tcpheader length
 					//then copy all of the next totalLength bytes into new buffer-jg
-					char *tmp = new char[totalLength];
-					char *data = new char[dataLength];
-					//all data in buffer
-					p.DupeRaw(tmp,totalLength);
-					tmp+=ipLength;
-					tmp+=tcpLength;
-					//should be pointing at start of data now-jg
-					while(tmp!=tmp+totalLength){
-						*data = *tmp;
-						data++;
-						tmp++;
+					if (dataLength > 0){
+						char *tmp = new char[totalLength];
+						char *data = new char[dataLength];
+						//all data in buffer
+						p.DupeRaw(tmp,totalLength);
+						tmp+=ipLength;
+						tmp+=tcpLength;
+						//should be pointing at start of data now-jg
+						while(tmp!=tmp+totalLength){
+							*data = *tmp;
+							data++;
+							tmp++;
+						}
+						//should have only application data in data buf now
+						//can send to socket, but not mux socket. have to send to sock-jg
+						int write = minet_write(sock,data,totalLength);
+						if(write < 0){
+							MinetSendToMonitor(MinetMonitoringEvent("error: data not sent to hose"));
+							break;
+						}		
+						//adjust receiving window and next expected packet-jg
+						cs->state.SetLastRecvd(seqNum);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+totalLength);
+						
+						//send ack with seq=send.next, ack=recv.next,ctrl=ack-jg
+						SET_ACK(newF);
+						th.SetSeqNum(cs->state.GetLastSent()+1,p2);
+						th.SetAckNum(seqNum,p2);
+						th.SetFlags(newF,p2);
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
 					}
-					//should have only application data in data buf now
-					//can send to socket, but not mux socket. have to send to sock-jg
-					int write = minet_write(sock,data,totalLength);
-					if(write < 0){
-						MinetSendToMonitor(MinetMonitoringEvent("error: data not sent to hose"));
-						break;
-					}		
-					//adjust receiving window and next expected packet-jg
-					cs->state.SetLastRecvd(seqNum);
-					cs->state.SetSendRwnd(cs->state.GetRwnd()+totalLength);
 					
-					//send ack with seq=send.next, ack=recv.next,ctrl=ack-jg
-					SET_ACK(newF);
-					th.SetSeqNum(cs->state.GetLastSent()+1,p2);
-					th.SetAckNum(cs->state.GetLastRecvd(),p2);
-					th.SetFlags(newF,p2);
-					p2.PushFrontHeader(th);
-					MinetSend(mux,p2);
+					//if fin is set, tell application that its closing-jg
+					//send ack for the fin
+					if(IS_FIN(oldF)){
+						CLR_ACK(newF); //get rid of any ack that data would have sent
+						th.SetSeqNum(cs->state.GetLastSent()+1,p2);
+						th.SetAckNum(seqNum,p2);
+						th.SetFlags(newF,p2);
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
+						cs->state.SetState(CLOSE_WAIT);
+					}
+					
 					break;
 				}
 				case FIN_WAIT1:
@@ -456,6 +482,12 @@ int main(int argc, char *argv[])
 							cs->state.SetState(FIN_WAIT2);
 						}
 					}
+					if(IS_FIN(oldF)){
+						//enter time-wait-jg
+						cs->state.SetState(TIME_WAIT);
+						//ignoring timer stuff for now
+						break;
+					}
 					break;
 				}
 				case FIN_WAIT2:
@@ -470,6 +502,10 @@ int main(int argc, char *argv[])
 						unsigned short segWin;
 						tcph.GetWinSize(segWin);
 						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
+					}
+					if(IS_FIN(oldF)){
+						cs->state.SetState(TIME_WAIT);
+						break;
 					}
 					break;
 				}
