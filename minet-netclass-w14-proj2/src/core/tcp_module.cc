@@ -113,10 +113,10 @@ void badSyn(unsigned char flag,Packet p,unsigned int ackNum, TCPHeader th,MinetH
 }
 
 //to more easily test for the flags required for states syn-rcvd-->closing
-bool checkFlags(unsigned length,bool inSequence, unsigned char oldF, unsigned char newF, Packet p, unsigned int ackNum, TCPHeader oldth, TCPHeader newth, MinetHandle mux, Connection c, ConnectionList<TCPState>::iterator cs){
+bool checkFlags(unsigned tcpLength,bool inSequence, unsigned char oldF, unsigned char newF, Packet p, unsigned int ackNum, TCPHeader oldth, TCPHeader newth, MinetHandle mux, Connection c, ConnectionList<TCPState>::iterator cs){
 	if(!inSequence){
 		//do packet error stuff-jg
-		MinetSend(mux, Unacceptable(c,oldth,cs->state,length));
+		MinetSend(mux, Unacceptable(c,oldth,cs->state,tcpLength));
 		return false;
 	}
 	//if reset is set, go to closed state-jg
@@ -176,14 +176,26 @@ int main(int argc, char *argv[])
 		Packet p;
 		bool checksumok;
 		MinetReceive(mux,p);
+		
 		//GET TCP HEADER SIZE-jg
 		//p.ExtractHeaderFromPayload<TCPHeader>(HEADER SIZE);
 		TCPHeader tcph;
 		tcph=p.FindHeader(Headers::TCPHeader);
+		unsigned tcpLength = tcph.EstimateTCPHeaderLength(p);
+		p.ExtractHeaderFromPayload(Headers::TCPHeader,tcpLength);
 		checksumok=tcph.IsCorrectChecksum(p);
-		unsigned length = tcph.EstimateTCPHeaderLength(p);
+		
+		//get ip total length for calculation of data size-jg
 		IPHeader iph;
 		iph=p.FindHeader(Headers::IPHeader);
+		unsigned short totalLength;
+		iph.GetTotalLength(totalLength);
+		unsigned char ipLength;
+		iph.GetHeaderLength(ipLength);
+		
+		//thanks to discussion board post by eric lin-jg
+		unsigned dataLength = totalLength - ipLength - tcpLength;
+		
 		Connection c;
 		//upd_module says that "source" is interpreted as "this machine"
 		//so this should be flipped
@@ -229,7 +241,7 @@ int main(int argc, char *argv[])
 			cerr << "State is " << cs->state.GetState();
 			cerr << endl;
 			bool inSequence;
-			inSequence = InSequence(tcph,cs->state,length);
+			inSequence = InSequence(tcph,cs->state,tcpLength);
 			unsigned int ISS = rand()%(2<< cs->state.GetN());
 		if (cs!=clist.end()) {
 			switch(cs->state.GetState()){
@@ -365,7 +377,7 @@ int main(int argc, char *argv[])
 				//Otherwise, first check the seq-num:pg 69-jg
 				case SYN_RCVD:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -381,7 +393,7 @@ int main(int argc, char *argv[])
 				}
 				case ESTABLISHED:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -392,11 +404,34 @@ int main(int argc, char *argv[])
 						tcph.GetWinSize(segWin);
 						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
 					}
+					//to get data, have length of data, length of ipheader, length of tcpheader
+					//should just be able to make a buffer and store payload there
+					//then move char * to ipheader length + tcpheader length
+					//then copy all of the next totalLength bytes into new buffer-jg
+					char *tmp = new char[totalLength];
+					char *data = new char[dataLength];
+					//all data in buffer
+					p.DupeRaw(tmp,totalLength);
+					tmp+=ipLength;
+					tmp+=tcpLength;
+					//should be pointing at start of data now-jg
+					while(tmp!=tmp+totalLength){
+						*data = *tmp;
+						data++;
+						tmp++;
+					}
+					//should have only application data in data buf now
+					//can send to socket, but not mux socket. have to send to sock-jg
+					int write = minet_write(sock,data,totalLength);
+					if(write < 0){
+						MinetSendToMonitor(MinetMonitoringEvent("error: data not sent to hose"));
+						break;
+					}					
 					break;
 				}
 				case FIN_WAIT1:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -414,7 +449,7 @@ int main(int argc, char *argv[])
 				}
 				case FIN_WAIT2:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -429,7 +464,7 @@ int main(int argc, char *argv[])
 				}
 				case CLOSE_WAIT:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -445,7 +480,7 @@ int main(int argc, char *argv[])
 				
 				case CLOSING:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_ACK(oldF)){
@@ -463,7 +498,7 @@ int main(int argc, char *argv[])
 				}
 				case LAST_ACK:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_FIN(oldF)&&(IS_ACK(oldF))){
@@ -473,7 +508,7 @@ int main(int argc, char *argv[])
 				}
 				case TIME_WAIT:
 				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+					if(!checkFlags(tcpLength,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
 					if(IS_FIN(oldF)){
