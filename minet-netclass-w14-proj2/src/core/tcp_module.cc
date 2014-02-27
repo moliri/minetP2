@@ -641,6 +641,9 @@ int main(int argc, char *argv[])
 	  cerr << "sock is " << sock << endl;
 	  if (event.handle==sock) {
 		SockRequestResponse request;
+		MinetReceive(sock, request); //adding actual call to MinetReceive - lm
+		cerr << "Socket request is " << request << endl; //debug - lm
+		
 		if(MinetReceive(sock,request)< 0){
 			cerr << "Unable to receive Socket...\n";
 			return -1;
