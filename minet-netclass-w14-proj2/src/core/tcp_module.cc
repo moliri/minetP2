@@ -139,6 +139,7 @@ bool checkFlags(unsigned tcpLength,bool inSequence, unsigned char oldF, unsigned
 int main(int argc, char *argv[])
 {
   //i don't know if we should change these at all--jg
+  //looks like mux is not initialized properly, looking into it -lm
   MinetHandle mux, sock;
 
   ConnectionList<TCPState> clist;
@@ -150,11 +151,13 @@ int main(int argc, char *argv[])
 
   if (MinetIsModuleInConfig(MINET_IP_MUX) && mux==MINET_NOHANDLE) {
     MinetSendToMonitor(MinetMonitoringEvent("Can't connect to ip_mux"));
+	cerr << "can't connect to ip_mux \n"; //debug - lm
     return -1;
   }
 
   if (MinetIsModuleInConfig(MINET_SOCK_MODULE) && sock==MINET_NOHANDLE) {
     MinetSendToMonitor(MinetMonitoringEvent("Can't accept from sock module"));
+	cerr << "can't accept from SOCK module \n";  //debug - lm
     return -1;
   }
 
@@ -165,17 +168,22 @@ int main(int argc, char *argv[])
   MinetEvent event;
 
   while (MinetGetNextEvent(event)==0) {
+	cerr << "are we in the while loop? \n";
     // if we received an unexpected type of event, print error
     if (event.eventtype!=MinetEvent::Dataflow 
 	|| event.direction!=MinetEvent::IN) {
       MinetSendToMonitor(MinetMonitoringEvent("Unknown event ignored."));
     // if we received a valid event from Minet, do processing
-    } else {
+    } 
+	else {
       //  Data from the IP layer below  //
+	  cerr << "event.handle is " << event.handle << endl;  //debug, event.handle=1 and mux=0, never enter the mux if statement - lm
+	  cerr << "mux is " << mux << endl;
       if (event.handle==mux) {
 		Packet p;
 		bool checksumok;
 		MinetReceive(mux,p);
+		cerr << "MinetReceive successful \n"; //debug - lm
 		
 		//GET TCP HEADER SIZE-jg
 		//p.ExtractHeaderFromPayload<TCPHeader>(HEADER SIZE);
@@ -184,6 +192,8 @@ int main(int argc, char *argv[])
 		unsigned tcpLength = tcph.EstimateTCPHeaderLength(p);
 		p.ExtractHeaderFromPayload(Headers::TCPHeader,tcpLength);
 		checksumok=tcph.IsCorrectChecksum(p);
+		
+		cerr << "TCP header size obtained \n"; //debug - lm
 		
 		//get ip total length for calculation of data size-jg
 		IPHeader iph;
@@ -196,9 +206,14 @@ int main(int argc, char *argv[])
 		//thanks to discussion board post by eric lin-jg
 		unsigned dataLength = totalLength - ipLength - tcpLength;
 		
+		cerr << "total length is " << totalLength << endl; //debug - lm
+		cerr << "data length is " << dataLength << endl; //debug - lm
+		
 		Connection c;
 		//upd_module says that "source" is interpreted as "this machine"
 		//so this should be flipped
+		cerr << "Dest IP is" << c.src << endl; //double checking src/dest IP adds -lm
+		cerr << "Src IP is" << c.dest << endl;
 		iph.GetDestIP(c.src);
 		iph.GetSourceIP(c.dest);
 
@@ -622,26 +637,42 @@ int main(int argc, char *argv[])
 		  }*/
 		  //  Data from the Sockets layer above  //
 		  }
-    if (event.handle==sock) {
+	  cerr << "event.handle is " << event.handle << endl;  //debug, event.handle=1 and sock=1, enter the sock if statement - lm
+	  cerr << "sock is " << sock << endl;
+	  if (event.handle==sock) {
 		SockRequestResponse request;
 		if(MinetReceive(sock,request)< 0){
 			cerr << "Unable to receive Socket...\n";
 			return -1;
 		}
 		  //following lines copied from lines 127-137 of udp_module.cc-jg
+		  //likely need to modify this, bytes and length are 0 and packet looks empty - lm
 		  unsigned bytes = MIN_MACRO(TCP_HEADER_OPTION_MAX_LENGTH, request.data.GetSize());
 		  Packet p(request.data.ExtractFront(bytes));
 
 		  unsigned len = request.data.GetSize();//idea from buffer.h to get tcpheader size-jg
 		  
+		  //debug, checking values - lm
+		  cerr << "bytes is " << bytes <<endl; //0
+		  cerr << "packet is " << p <<endl; //Packet(headers={}, payload=Buffer(size=0, data= , text=""), trailers={})
+		  cerr << "length is " << len <<endl; //0
+		  
+		  
+		  
 		  //make IPHeader first-jg
 		  IPHeader ih;
-		  ih.SetProtocol(IP_PROTO_TCP);
-		  ih.SetSourceIP(request.connection.src);
-		  ih.SetDestIP(request.connection.dest);
-		  ih.SetTotalLength(bytes+len+IP_HEADER_BASE_LENGTH);
+		  ih.SetProtocol(IP_PROTO_TCP); //worked -lm
+		  ih.SetSourceIP(request.connection.src); //worked -lm
+		  ih.SetDestIP(request.connection.dest);  //not set? see Header comment below -lm
+		  ih.SetTotalLength(bytes+len+IP_HEADER_BASE_LENGTH); //length not updated - lm
 		  // push it onto the packet
-		  p.PushFrontHeader(ih);
+		  p.PushFrontHeader(ih); //header not updated correctly, see comment below - lm
+		  
+		  //debug, checking values - lm
+		  cerr << "IP Header is " << ih <<endl; //IPHeader( version=4, hlen=5 (20), tos=0, len=20, id=1, flags=2(DO NOT FRAGMENT NO MORE FRAGMENTS), fragoff=0, ttl=64, proto=6(TCP), checksum=8899(valid), computedchecksum=0, src=IPAddress(10.10.14.23), dst=IPAddress(0.0.0.0)noopts) 
+		  cerr << "bytes is now " << bytes <<endl; //0
+		  cerr << "packet is now " << p <<endl; //Packet(headers={TaggedBuffer(tag=IPHeader, Buffer(size=20, data=45...etc, text="E+++++@+@" "++++++++")}, payload=Buffer(size=0, data=, text=""), trailers={}) 
+		  cerr << "length is now " << len <<endl; //0
 		  
 		  //iterator and mapping-jg
 		  ConnectionList<TCPState>::iterator cs = clist.FindMatching(request.connection);

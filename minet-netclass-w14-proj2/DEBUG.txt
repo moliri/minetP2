@@ -2,7 +2,7 @@ Bugs:
 
 Notes: For input, [S] = server, [C] = client
 
-1 [ ] TCP Server issue
+1 [ ] ACCEPT issue
 		INPUT												OUTPUT
 		- [S] ./start_minet.sh "tcp_server u 2323"			- tcp_server module prints:
 																Stack initialized
@@ -18,4 +18,10 @@ Notes: For input, [S] = server, [C] = client
 		- [C] nc 10.10.14.23 2323							- tcp_module prints:
 																Module is dying due to SIGSEGV
 																Enter to continue (closes module)
+		
+		Info from groups:
+		- Getting segmentation faults when we see SIGSEGV, likely need to modify ACCEPT.
+		- maybe need to modify initialization of mux and sock?
+		- event.handle == sock, so we enter second if statement
+		- when updated IP Header is printed, it looks like it copies to the packet incorrectly
 	
