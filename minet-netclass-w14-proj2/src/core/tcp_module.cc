@@ -426,7 +426,18 @@ int main(int argc, char *argv[])
 					if(write < 0){
 						MinetSendToMonitor(MinetMonitoringEvent("error: data not sent to hose"));
 						break;
-					}					
+					}		
+					//adjust receiving window and next expected packet-jg
+					cs->state.SetLastRecvd(seqNum);
+					cs->state.SetSendRwnd(cs->state.GetRwnd()+totalLength);
+					
+					//send ack with seq=send.next, ack=recv.next,ctrl=ack-jg
+					SET_ACK(newF);
+					th.SetSeqNum(cs->state.GetLastSent()+1,p2);
+					th.SetAckNum(cs->state.GetLastRecvd(),p2);
+					th.SetFlags(newF,p2);
+					p2.PushFrontHeader(th);
+					MinetSend(mux,p2);
 					break;
 				}
 				case FIN_WAIT1:
