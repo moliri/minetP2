@@ -230,7 +230,7 @@ int main(int argc, char *argv[])
 			cerr << endl;
 			bool inSequence;
 			inSequence = InSequence(tcph,cs->state,length);
-			unsigned int ISS = rand()%cs->state.GetN();
+			unsigned int ISS = rand()%(2<< cs->state.GetN());
 		if (cs!=clist.end()) {
 			switch(cs->state.GetState()){
 				case CLOSED:
@@ -368,6 +368,15 @@ int main(int argc, char *argv[])
 					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
+					if(IS_ACK(oldF)){
+						//if send.unacked <= seg.ack <= send.next, then enter established state
+						cs->state.SetState(ESTABLISHED);
+						break;
+					}
+					else{
+						//not acceptable, then form reset and send it.
+						//this case already handled by checkFlags
+					}
 					break;
 				}
 				case ESTABLISHED:
@@ -375,12 +384,13 @@ int main(int argc, char *argv[])
 					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
-					break;
-				}
-				case CLOSE_WAIT:
-				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
-						break;
+					if(IS_ACK(oldF)){
+						//if acceptable, set last acked to seq.ack
+						cs->state.SetLastAcked(ackNum);
+						//update sender window
+						unsigned short segWin;
+						tcph.GetWinSize(segWin);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
 					}
 					break;
 				}
@@ -389,19 +399,16 @@ int main(int argc, char *argv[])
 					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
-					break;
-				}
-				case CLOSING:
-				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
-						break;
-					}
-					break;
-				}
-				case LAST_ACK:
-				{
-					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
-						break;
+					if(IS_ACK(oldF)){
+						//if acceptable, set last acked to seq.ack
+						cs->state.SetLastAcked(ackNum);
+						//update sender window
+						unsigned short segWin;
+						tcph.GetWinSize(segWin);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
+						if(IS_FIN(oldF)){
+							cs->state.SetState(FIN_WAIT2);
+						}
 					}
 					break;
 				}
@@ -410,11 +417,74 @@ int main(int argc, char *argv[])
 					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
 						break;
 					}
+					if(IS_ACK(oldF)){
+						//if acceptable, set last acked to seq.ack
+						cs->state.SetLastAcked(ackNum);
+						//update sender window
+						unsigned short segWin;
+						tcph.GetWinSize(segWin);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
+					}
+					break;
+				}
+				case CLOSE_WAIT:
+				{
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+						break;
+					}
+					if(IS_ACK(oldF)){
+						//if acceptable, set last acked to seq.ack
+						cs->state.SetLastAcked(ackNum);
+						//update sender window
+						unsigned short segWin;
+						tcph.GetWinSize(segWin);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
+					}
+					break;
+				}
+				
+				case CLOSING:
+				{
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+						break;
+					}
+					if(IS_ACK(oldF)){
+						//if acceptable, set last acked to seq.ack
+						cs->state.SetLastAcked(ackNum);
+						//update sender window
+						unsigned short segWin;
+						tcph.GetWinSize(segWin);
+						cs->state.SetSendRwnd(cs->state.GetRwnd()+segWin);
+						if(IS_FIN(oldF)){
+							cs->state.SetState(TIME_WAIT);
+						}
+					}
+					break;
+				}
+				case LAST_ACK:
+				{
+					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+						break;
+					}
+					if(IS_FIN(oldF)&&(IS_ACK(oldF))){
+						cs->state.SetState(CLOSED);
+					}
 					break;
 				}
 				case TIME_WAIT:
 				{
 					if(!checkFlags(length,inSequence,oldF,newF,p2,ackNum,tcph,th,mux,c,cs)){
+						break;
+					}
+					if(IS_FIN(oldF)){
+						//acknowledge the fin and restart msl
+						th.SetAckNum(seqNum+1,p2);
+						th.SetSeqNum(ackNum+1,p2);
+						SET_ACK(newF);
+						SET_FIN(newF);
+						th.SetFlags(newF,p2);
+						p2.PushFrontHeader(th);
+						MinetSend(mux,p2);
 						break;
 					}
 					break;
