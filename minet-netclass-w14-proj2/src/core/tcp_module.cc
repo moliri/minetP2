@@ -738,7 +738,7 @@ int main(int argc, char *argv[])
 			  SockRequestResponse reply;
 			  reply.type=CONNECT;
 			  reply.connection=request.connection;
-			  reply.bytes=bytes;
+			  reply.bytes=request.bytes;
 			  reply.error=EOK;
 			  MinetSend(sock,reply);
 			  
@@ -766,7 +766,7 @@ int main(int argc, char *argv[])
 				SockRequestResponse reply;
 				reply.type=ACCEPT;
 				reply.connection=request.connection;
-				reply.bytes=bytes;
+				reply.bytes=request.bytes;
 				reply.error=EOK;
 				MinetSend(sock,reply);
 				
@@ -775,10 +775,26 @@ int main(int argc, char *argv[])
 		  case STATUS:
 		  case WRITE:
 		  //send out the packet to the designated connection in clist-jg
+		  {
+			SockRequestResponse reply;
+			reply.type=WRITE;
+			reply.connection=request.connection;
+			reply.bytes=request.bytes;
+			reply.error=EOK;
+			MinetSend(sock,reply);
+			break;
+		  }
 		  case FORWARD:
 		  case CLOSE:
-		  //send fin bit -jg
-		  //change state-jg
+		  {
+			SockRequestResponse reply;
+			reply.type=CLOSE;
+			reply.connection=request.connection;
+			reply.bytes=request.bytes;
+			reply.error=EOK;
+			MinetSend(sock,reply);
+			break;
+		  }
 		  default:
 			SockRequestResponse reply;
 			reply.type=STATUS;
