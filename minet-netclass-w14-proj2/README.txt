@@ -1,6 +1,6 @@
-README for TCP Project of Networking 340, winter 2014
-Jordan Geltner (jmg920), "-jg" in code
-Leesha Maliakal (lvm908), "lm" in code
+README for TCP Project of Networking 340, Winter 2014
+Jordan Geltner (jmg920), "-jg" in code comments
+Leesha Maliakal (lvm908), "lm" in code comments
 
 work by each member:
 
@@ -14,4 +14,8 @@ jmg920:
 	-wrote cases ACCEPT, CONNECT, and default for socket events
 
 lvm908:
-	
+	-debugged all code using wireshark, print statements, and module output
+	-documented debug progress in detail in DEBUG.txt 
+	-debugged tcp/header manipulation code
+	-rewrote calculation of IP header length
+	-debugged implementation of TCP in switch statement

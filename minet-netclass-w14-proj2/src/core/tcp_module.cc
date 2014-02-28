@@ -168,7 +168,6 @@ int main(int argc, char *argv[])
   MinetEvent event;
 
   while (MinetGetNextEvent(event)==0) {
-	cerr << "are we in the while loop? \n";
     // if we received an unexpected type of event, print error
     if (event.eventtype!=MinetEvent::Dataflow 
 	|| event.direction!=MinetEvent::IN) {
@@ -637,6 +636,7 @@ int main(int argc, char *argv[])
 		  }*/
 		  //  Data from the Sockets layer above  //
 		  }
+	  
 	  cerr << "event.handle is " << event.handle << endl;  //debug, event.handle=1 and sock=1, enter the sock if statement - lm
 	  cerr << "sock is " << sock << endl;
 	  if (event.handle==sock) {
@@ -644,42 +644,60 @@ int main(int argc, char *argv[])
 		MinetReceive(sock, request); //adding actual call to MinetReceive - lm
 		cerr << "Socket request is " << request << endl; //debug - lm
 		
+		
+		
+		//iterator and mapping-jg, moved up to use earlier in header calc - lm
+		ConnectionList<TCPState>::iterator cs = clist.FindMatching(request.connection);
+		ConnectionToStateMapping<TCPState> mapping;
+		cerr << "Mapping is: " << mapping << endl;  //shows src and dest IPs as both 0.0.0.0:0 for connection
+		
 		if(MinetReceive(sock,request)< 0){
 			cerr << "Unable to receive Socket...\n";
 			return -1;
 		}
-		  //following lines copied from lines 127-137 of udp_module.cc-jg
-		  //likely need to modify this, bytes and length are 0 and packet looks empty - lm
-		  unsigned bytes = MIN_MACRO(TCP_HEADER_OPTION_MAX_LENGTH, request.data.GetSize());
-		  Packet p(request.data.ExtractFront(bytes));
-
-		  unsigned len = request.data.GetSize();//idea from buffer.h to get tcpheader size-jg
+		//following lines copied from lines 127-137 of udp_module.cc-jg
+		//likely need to modify this, bytes and length are 0 and packet looks empty - lm
+	//	unsigned bytes = MIN_MACRO(TCP_HEADER_OPTION_MAX_LENGTH, request.data.GetSize());
+	//	Packet p(request.data.ExtractFront(bytes));
+	//	unsigned len = request.data.GetSize();//idea from buffer.h to get tcpheader size-jg
+		
+		// ******PROGRAM HANGS HERE****** //
+		
+		//recalculating IP header length - lm
+		unsigned int len = request.data.GetSize();  //keeps giving us 0, need to change this - lm
+		unsigned int bytes = len;
+		cerr << "Bytes after GetSize(): " << bytes << endl;  //debug - lm
+		Packet p(request.data.ExtractFront(bytes));
+		unsigned int wSize = cs->state.last_sent - cs->state.last_acked;
+		bytes = MIN(len, cs->state.GetN() - wSize);
+		cerr << "Bytes after min of len and getN-wSize: " << bytes << endl;  //debug - lm
+	//	bytes = MIN(bytes, cs->state.rwnd); //doesn't compile -lm
+	//	cerr << "Bytes after min of bytes, rwnd " << bytes << endl;  //debug - lm
+		bytes = MIN(bytes, TCP_MAXIMUM_SEGMENT_SIZE);
+		cerr << "Bytes after min of bytes, max TCP seg size" << bytes << endl;  //debug - lm
 		  
-		  //debug, checking values - lm
-		  cerr << "bytes is " << bytes <<endl; //0
-		  cerr << "packet is " << p <<endl; //Packet(headers={}, payload=Buffer(size=0, data= , text=""), trailers={})
-		  cerr << "length is " << len <<endl; //0
+		//debug, checking values - lm
+		cerr << "bytes is " << bytes <<endl; //0
+		cerr << "packet is " << p <<endl; //Packet(headers={}, payload=Buffer(size=0, data= , text=""), trailers={})
+		cerr << "length is " << len <<endl; //0
 		  
 		  
 		  
-		  //make IPHeader first-jg
-		  IPHeader ih;
-		  ih.SetProtocol(IP_PROTO_TCP); //worked -lm
-		  ih.SetSourceIP(request.connection.src); //worked -lm
-		  ih.SetDestIP(request.connection.dest);  //not set? see Header comment below -lm
-		  ih.SetTotalLength(bytes+len+IP_HEADER_BASE_LENGTH); //length not updated - lm
-		  // push it onto the packet
-		  p.PushFrontHeader(ih); //header not updated correctly, see comment below - lm
+		//make IPHeader first-jg
+		IPHeader ih;
+		ih.SetProtocol(IP_PROTO_TCP); //worked -lm
+		ih.SetSourceIP(request.connection.src); //worked -lm
+		ih.SetDestIP(request.connection.dest);  //not set? see Header comment below -lm
+		ih.SetTotalLength(bytes+len+IP_HEADER_BASE_LENGTH); //length not updated - lm
+		// push it onto the packet
+		p.PushFrontHeader(ih); //header not updated correctly, see comment below - lm
 		  
-		  //debug, checking values - lm
-		  cerr << "IP Header is " << ih <<endl; //IPHeader( version=4, hlen=5 (20), tos=0, len=20, id=1, flags=2(DO NOT FRAGMENT NO MORE FRAGMENTS), fragoff=0, ttl=64, proto=6(TCP), checksum=8899(valid), computedchecksum=0, src=IPAddress(10.10.14.23), dst=IPAddress(0.0.0.0)noopts) 
-		  cerr << "bytes is now " << bytes <<endl; //0
-		  cerr << "packet is now " << p <<endl; //Packet(headers={TaggedBuffer(tag=IPHeader, Buffer(size=20, data=45...etc, text="E+++++@+@" "++++++++")}, payload=Buffer(size=0, data=, text=""), trailers={}) 
-		  cerr << "length is now " << len <<endl; //0
-		  
-		  //iterator and mapping-jg
-		  ConnectionList<TCPState>::iterator cs = clist.FindMatching(request.connection);
-		  ConnectionToStateMapping<TCPState> mapping;
+		//debug, checking values - lm
+		 cerr << "Destination IP set to: " << request.connection.dest << endl;
+		cerr << "IP Header is " << ih <<endl; //IPHeader( version=4, hlen=5 (20), tos=0, len=20, id=1, flags=2(DO NOT FRAGMENT NO MORE FRAGMENTS), fragoff=0, ttl=64, proto=6(TCP), checksum=8899(valid), computedchecksum=0, src=IPAddress(10.10.14.23), dst=IPAddress(0.0.0.0)noopts) 
+		cerr << "bytes is now " << bytes <<endl; //0
+		cerr << "packet is now " << p <<endl; //Packet(headers={TaggedBuffer(tag=IPHeader, Buffer(size=20, data=45...etc, text="E+++++@+@" "++++++++")}, payload=Buffer(size=0, data=, text=""), trailers={}) 
+		cerr << "length is now " << len <<endl; //0
 		  
 		switch (request.type) {
 		  case CONNECT:

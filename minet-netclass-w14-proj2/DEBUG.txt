@@ -37,6 +37,29 @@ Notes: For input, [S] = server, [C] = client
 																Socket bound.
 																Socket listened.
 		
-		- [C] nc 10.10.14.23 2323							
+		- [C] nc -vz 10.10.14.23 2323						- 
+					
+
+3 [ ] TCP Failing issue		
+		- [S] ./start_minet.sh "tcp_server u 2323"			- tcp_server module prints:
+																Stack initialized
+																Socket created.
+																Socket bound.
+																Socket listened.
+															- tcp_module debug prints:
+																destIP is not set (0.0.0.0:0)
+															- arp_module prints:
+																answering ARPs for 10.10.14.23
 		
+		- [C] nc -vz 10.10.14.23 2323						- arp_module prints:
+				[C] prints: 									Remote Request, senderIP = 129.105.7.236, targetIP: 10.10.14.23
+				nc: connect to 10.10.14.23 port 2323 			Remote Response, targetIP = 129.105.7.236, senderIP: 10.10.14.23
+				(tcp) failed: Connection timed out 				Repeats, but with 129.105.7.220			
+				|| No route to host							- ip_module prints:
+																Received Packet:
+																	src=129.105.7.236
+																	IPHeader
+																	Packet
+																Repeated 3 times, same IP
+																
 	
